@@ -16,7 +16,6 @@ def load_data():
                           names=['userId','movieId','rating','timestamp'])
     movies = pd.read_csv('ml-100k/u.item', sep='|', header=None, usecols=[0,1,2],
                          names=['movieId','title','year'], encoding='latin-1')
-    # Ensure movieId type consistency
     ratings['movieId'] = ratings['movieId'].astype(int)
     movies['movieId'] = movies['movieId'].astype(int)
     return ratings, movies
@@ -44,7 +43,6 @@ def recommend_movies(user_id, n=10):
     all_movie_ids = ratings['movieId'].unique()
     user_movies = ratings[ratings['userId']==user_id]['movieId'].values
     testset = [(user_id, mid, 0) for mid in all_movie_ids if mid not in user_movies]
-    
     predictions = model.test(testset)
     top_n = get_top_n_recommendations(predictions, n)
     
@@ -56,20 +54,29 @@ def recommend_movies(user_id, n=10):
         top_movies.append((title, year, est))
     return top_movies
 
+def top_rated_movies_overall(n=10):
+    merged = pd.merge(ratings, movies, on='movieId')
+    avg_ratings = merged.groupby(['movieId', 'title', 'year'])['rating'].mean().reset_index()
+    avg_ratings = avg_ratings.sort_values('rating', ascending=False).head(n)
+    return avg_ratings
+
 # ========================
 # Streamlit UI
 # ========================
 st.title("🎬 Movie Recommendation System")
-st.write("Select your User ID to get personalized movie recommendations:")
 
-# User dropdown
-user_list = sorted(ratings['userId'].unique())
+# ----- User Recommendations -----
+st.subheader("Personalized Recommendations")
+user_groups = ['1-100', '101-200', '201-300', '301-500', '501-943']
+selected_group = st.selectbox("Select User ID Range", user_groups)
+
+# Filter user list by group
+start, end = map(int, selected_group.split('-'))
+user_list = sorted([uid for uid in ratings['userId'].unique() if start <= uid <= end])
 user_id = st.selectbox("Choose User ID", user_list)
 
-# Top-N slider
 top_n = st.slider("Select number of recommended movies", 5, 20, 10)
 
-# Get recommendations
 if st.button("Get Recommendations"):
     recommendations = recommend_movies(user_id, n=top_n)
     
@@ -85,13 +92,19 @@ if st.button("Get Recommendations"):
     fig, ax = plt.subplots()
     ax.barh(titles[::-1], scores[::-1], color='skyblue')
     ax.set_xlabel("Predicted Rating")
-    ax.set_title("Top-N Recommended Movie Ratings")
+    ax.set_title(f"Top {top_n} Recommended Movie Ratings")
     st.pyplot(fig)
 
-# Random user recommendation
+# ----- Random User Recommendation -----
 if st.button("Random User Recommendation"):
     random_user = random.choice(user_list)
     st.subheader(f"🎉 Recommendations for Random User {random_user}")
     recommendations = recommend_movies(random_user, n=top_n)
     for i, (title, year, score) in enumerate(recommendations, start=1):
         st.write(f"{i}. {title} ({year}) - Predicted Rating: {score:.2f}")
+
+# ----- Top Rated Movies Overall -----
+st.subheader("🔥 Top Rated Movies Overall")
+top_movies = top_rated_movies_overall(n=10)
+for i, row in top_movies.iterrows():
+    st.write(f"{i+1}. {row['title']} ({row['year']}) - Average Rating: {row['rating']:.2f}")
