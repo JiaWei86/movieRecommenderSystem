@@ -67,7 +67,7 @@ st.title("🎬 Movie Recommendation System")
 
 # ----- User Recommendations -----
 st.subheader("Personalized Recommendations")
-user_groups = ['1-100', '101-200', '201-300', '301-500', '501-943']
+user_groups = ['1-200', '201-400', '401-600', '601-800', '801-943']
 selected_group = st.selectbox("Select User ID Range", user_groups)
 
 # Filter user list by group
