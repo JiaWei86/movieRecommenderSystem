@@ -1,33 +1,32 @@
 # app.py
 import streamlit as st
 import pandas as pd
-from surprise import SVD
-import joblib
+from surprise import SVD, Dataset, Reader
 from collections import defaultdict
-from sklearn.metrics.pairwise import cosine_similarity
+import joblib
+import random
+import matplotlib.pyplot as plt
 
 # ========================
 # Load Data
 # ========================
 @st.cache_data
 def load_data():
-    ratings = pd.read_csv('ml-100k/u.data', sep='\t', header=None, names=['userId','movieId','rating','timestamp'])
-    movies = pd.read_csv('ml-100k/u.item', sep='|', header=None, usecols=[0,1], names=['movieId','title'], encoding='latin-1')
+    ratings = pd.read_csv('ml-100k/u.data', sep='\t', header=None,
+                          names=['userId','movieId','rating','timestamp'])
+    movies = pd.read_csv('ml-100k/u.item', sep='|', header=None, usecols=[0,1,2],
+                         names=['movieId','title','year'], encoding='latin-1')
+    # Ensure movieId type consistency
+    ratings['movieId'] = ratings['movieId'].astype(int)
+    movies['movieId'] = movies['movieId'].astype(int)
     return ratings, movies
 
 ratings, movies = load_data()
 
 # ========================
-# Load SVD Model
+# Load Model
 # ========================
-model = joblib.load('model.joblib')
-
-# ========================
-# Compute Movie Similarity (using ratings)
-# ========================
-movie_ratings = ratings.pivot(index='userId', columns='movieId', values='rating').fillna(0)
-similarity_matrix = cosine_similarity(movie_ratings.T)
-similarity_df = pd.DataFrame(similarity_matrix, index=movie_ratings.columns, columns=movie_ratings.columns)
+model = joblib.load('model.joblib')  
 
 # ========================
 # Helper Functions
@@ -45,53 +44,54 @@ def recommend_movies(user_id, n=10):
     all_movie_ids = ratings['movieId'].unique()
     user_movies = ratings[ratings['userId']==user_id]['movieId'].values
     testset = [(user_id, mid, 0) for mid in all_movie_ids if mid not in user_movies]
+    
     predictions = model.test(testset)
     top_n = get_top_n_recommendations(predictions, n)
-    top_movies = [(movies[movies['movieId']==mid]['title'].values[0], est) for mid, est in top_n[user_id]]
-    return top_movies
-
-def recommend_similar_movies(movie_name, top_n=5):
-    movie_row = movies[movies['title'].str.contains(movie_name, case=False)]
-    if movie_row.empty:
-        return f"No movies found matching '{movie_name}'"
-    movie_id = movie_row.iloc[0]['movieId']
-    similar_scores = similarity_df[movie_id].sort_values(ascending=False).drop(movie_id)
-    top_movies = [(movies[movies['movieId']==mid]['title'].values[0], score) for mid, score in similar_scores.head(top_n).items()]
+    
+    top_movies = []
+    for mid, est in top_n[user_id]:
+        movie_row = movies[movies['movieId']==mid]
+        title = movie_row['title'].values[0]
+        year = movie_row['year'].values[0] if 'year' in movie_row.columns else ''
+        top_movies.append((title, year, est))
     return top_movies
 
 # ========================
 # Streamlit UI
 # ========================
-st.title("Movie Recommendation System 🎬")
+st.title("🎬 Movie Recommendation System")
+st.write("Select your User ID to get personalized movie recommendations:")
 
-# create left and right column
-col1, col2 = st.columns(2)
+# User dropdown
+user_list = sorted(ratings['userId'].unique())
+user_id = st.selectbox("Choose User ID", user_list)
 
-# 左栏：User ID 推荐
-with col1:
-    st.subheader("1️⃣ User-Based Recommendation")
-    user_id = st.number_input(
-        "Enter your User ID:",
-        min_value=int(ratings['userId'].min()),
-        max_value=int(ratings['userId'].max()),
-        step=1,
-        key="user_input"
-    )
-    if st.button("Get User Recommendations", key="user_btn"):
-        recommendations = recommend_movies(user_id, n=10)
-        st.subheader(f"Top 10 movies for User {user_id}:")
-        for i, (title, score) in enumerate(recommendations, start=1):
-            st.write(f"{i}. {title} (Predicted Rating: {score:.2f})")
+# Top-N slider
+top_n = st.slider("Select number of recommended movies", 5, 20, 10)
 
-# 右栏：电影搜索 & 相似电影推荐
-with col2:
-    st.subheader("2️⃣ Search Movie & Recommend Similar Movies")
-    movie_input = st.text_input("Enter a movie name:", key="movie_input")
-    if st.button("Search Similar Movies", key="movie_btn"):
-        results = recommend_similar_movies(movie_input, top_n=5)
-        if isinstance(results, str):
-            st.write(results)
-        else:
-            st.subheader(f"Top 5 movies similar to '{movie_input}':")
-            for i, (title, score) in enumerate(results, start=1):
-                st.write(f"{i}. {title} (Similarity: {score:.2f})")
+# Get recommendations
+if st.button("Get Recommendations"):
+    recommendations = recommend_movies(user_id, n=top_n)
+    
+    st.subheader(f"Top {top_n} Recommended Movies for User {user_id}:")
+    titles = []
+    scores = []
+    for i, (title, year, score) in enumerate(recommendations, start=1):
+        st.write(f"{i}. {title} ({year}) - Predicted Rating: {score:.2f}")
+        titles.append(f"{title} ({year})")
+        scores.append(score)
+    
+    # Show bar chart
+    fig, ax = plt.subplots()
+    ax.barh(titles[::-1], scores[::-1], color='skyblue')
+    ax.set_xlabel("Predicted Rating")
+    ax.set_title("Top-N Recommended Movie Ratings")
+    st.pyplot(fig)
+
+# Random user recommendation
+if st.button("Random User Recommendation"):
+    random_user = random.choice(user_list)
+    st.subheader(f"🎉 Recommendations for Random User {random_user}")
+    recommendations = recommend_movies(random_user, n=top_n)
+    for i, (title, year, score) in enumerate(recommendations, start=1):
+        st.write(f"{i}. {title} ({year}) - Predicted Rating: {score:.2f}")
